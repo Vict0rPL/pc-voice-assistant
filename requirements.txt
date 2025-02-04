@@ -10,3 +10,5 @@ SpeechRecognition
 SpeechRecognition[whisper-local]
 mss
 Pillow
+ollama
+pyttsx3
