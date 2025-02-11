@@ -8,5 +8,8 @@ pyaudio
 soundfile
 SpeechRecognition
 SpeechRecognition[whisper-local]
+SpeechRecognition[faster-whisper]
+faster-whisper
 mss
 Pillow
+Whisper

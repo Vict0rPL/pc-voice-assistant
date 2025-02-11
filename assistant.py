@@ -1,6 +1,6 @@
 import base64
 from threading import Lock, Thread
-
+from faster_whisper import WhisperModel
 import numpy as np
 from PIL.Image import Image
 # Load environment variables from a .env file
@@ -19,21 +19,24 @@ from langchain.schema.messages import SystemMessage
 from langchain_community.chat_message_histories import ChatMessageHistory
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 # Import LangChain OpenAI integration for chat models
 from langchain_openai import ChatOpenAI
 
 # Import PyAudio and speech_recognition libraries for audio processing
 from pyaudio import PyAudio, paInt16
-from speech_recognition import Microphone, Recognizer, UnknownValueError
+import speech_recognition as sr
+from faster_whisper import WhisperModel
+import io
 
 # Constants
 AUDIO_FORMAT = paInt16
 CHANNELS = 1
-RATE = 24000
+RATE = 23000
 CHUNK_SIZE = 1024
 TTS_MODEL = "tts-1"
-TTS_VOICE = "alloy"
+TTS_VOICE = "nova"
 TTS_RESPONSE_FORMAT = "pcm"
 
 # Load environment variables from the .env file
@@ -129,7 +132,7 @@ class Assistant:
         Use few words on your answers. Go straight to the point. Do not use any
         emoticons or emojis. 
 
-        Be friendly and helpful. Show some personality.
+        Be friendly and helpful. Show some personality. Be cooperative.
         """
 
         prompt_template = ChatPromptTemplate.from_messages(
@@ -162,7 +165,7 @@ class Assistant:
 
 screen_stream = ScreenStream().start()
 
-# model = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest")
+#model = ChatGoogleGenerativeAI(model="gemini-1.5-flash-latest")
 
 # You can use OpenAI's GPT-4o model instead of Gemini Flash
 # by uncommenting the following line:
@@ -171,20 +174,53 @@ model = ChatOpenAI(model="gpt-4o")
 assistant = Assistant(model)
 
 
+
 def audio_callback(recognizer, audio):
     try:
-        prompt = recognizer.recognize_whisper(audio, model="base", language="english")
+        # Ensure `audio` is a valid AudioData object
+        if not isinstance(audio, sr.AudioData):
+            print("❌ Invalid audio object received.")
+            return
+
+        # Convert to file-like object for Faster-Whisper
+        wav_data = io.BytesIO(audio.get_wav_data(convert_rate=16000, convert_width=2))
+
+        # Load the Faster-Whisper model
+        model = WhisperModel("large-v2")
+
+        # Transcribe with a specific language (e.g., "pl" for Polish)
+        segments, _ = model.transcribe(wav_data, language="pl")
+
+        # Convert the transcribed segments into text
+        prompt = " ".join(segment.text for segment in segments)
+        print("📝 Recognized:", prompt)
+
+        # Send the transcribed text to the assistant
         assistant.answer(prompt, screen_stream.read(encode=True))
-    finally:
-        pass
+
+    except Exception as e:
+        print(f"❌ Error in recognition: {e}")
 
 
-recognizer = Recognizer()
-microphone = Microphone()
-with microphone as source:
-    recognizer.adjust_for_ambient_noise(source)
+recognizer = sr.Recognizer()
+mic = sr.Microphone()
 
-stop_listening = recognizer.listen_in_background(microphone, audio_callback)
+with mic as source:
+    recognizer.adjust_for_ambient_noise(source, duration=2)
+    print("🎙️ Say something...")
+    audio = recognizer.listen(source)
+    print("✅ Captured audio!")
+
+    try:
+        # Convert to text using Google's default STT (for testing)
+        text = recognizer.recognize_google(audio, language="pl-PL")
+        print("📝 Recognized text:", text)
+    except sr.UnknownValueError:
+        print("❌ Could not understand audio.")
+    except sr.RequestError as e:
+        print(f"❌ API error: {e}")
+
+stop_listening = recognizer.listen_in_background(mic, audio_callback)
 
 while True:
     frame = screen_stream.read()
